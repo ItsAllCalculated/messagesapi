@@ -57,7 +57,9 @@ app.post("/post", upload.array("files", 4), async (req, res) => {
 
   // Timestamp string
   const now = new Date();
-  const timeString = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+const cstHours = (now.getUTCHours() - 6 + 24) % 24; // UTC−6
+const timeString = `${now.getUTCMonth() + 1}/${now.getUTCDate()}/${now.getUTCFullYear()} ${String(cstHours).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
+
 
   const postData = {
     id: nextPostId++,
