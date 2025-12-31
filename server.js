@@ -2,7 +2,6 @@ import express from "express";
 import multer from "multer";
 import cors from "cors";
 import { Storage } from "@google-cloud/storage";
-import { DateTime } from "luxon"; // ✅ added luxon
 
 // -------------------------
 // Replace with your GCS bucket name
@@ -57,10 +56,18 @@ app.post("/post", upload.array("files", 4), async (req, res) => {
   );
 
   // -------------------------
-  // Use Luxon for CST timestamp
-  const nowCST = DateTime.now().setZone("America/Chicago");
-  const timeString = nowCST.toFormat("M/d/yyyy HH:mm");
+  // CST timestamp (no Luxon)
   // -------------------------
+  const now = new Date();
+  const timeString = now.toLocaleString("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 
   const postData = {
     id: nextPostId++,
@@ -84,27 +91,16 @@ app.post("/post", upload.array("files", 4), async (req, res) => {
 });
 
 // -------------------------
-// GET endpoints
-// -------------------------
-app.get("/getPosts", (req, res) => {
-  res.json(posts);
-});
+app.get("/getPosts", (req, res) => res.json(posts));
 
 app.get("/getNewPosts", (req, res) => {
   const since = Number(req.query.since);
   if (!since) return res.json([]);
-  const newPosts = posts.filter((post) => post.id > since);
-  res.json(newPosts);
+  res.json(posts.filter((p) => p.id > since));
 });
 
-// -------------------------
-// Test route
-// -------------------------
 app.get("/", (req, res) => res.send("Backend is running 🚀"));
 
-// -------------------------
-// Start server
-// -------------------------
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server listening on port ${PORT}`);
