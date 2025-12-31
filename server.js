@@ -46,7 +46,6 @@ app.post("/post", upload.array("files", 4), async (req, res) => {
         contentType: file.mimetype,
         resumable: false,
       });
-      await gcsFile.makePublic();
       return {
         filename: file.originalname,
         path: `https://storage.googleapis.com/${bucket.name}/${gcsFile.name}`,
