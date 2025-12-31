@@ -1,18 +1,21 @@
-# Use official Node.js LTS image
-FROM node:20-slim
+# Use an official Node runtime
+FROM node:18-alpine
 
 # Create app directory
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Install only dependencies first (faster builds)
 COPY package*.json ./
 RUN npm install --production
 
-# Copy source code
+# Copy the rest of the source
 COPY . .
 
-# Cloud Run listens on $PORT
+# Cloud Run will set PORT — do NOT hardcode it
 ENV PORT=8080
 
-# Start server
+# Cloud Run needs this line so it knows what port you expose
+EXPOSE 8080
+
+# Start the server
 CMD ["node", "server.js"]
