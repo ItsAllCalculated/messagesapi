@@ -16,7 +16,7 @@ let posts = [];
 let nextPostId = 1;
 
 // -------------------------
-// Use multer memory storage (works for Cloud Run)
+// Multer memory storage (works for Cloud Run)
 // -------------------------
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -55,19 +55,9 @@ app.post("/post", upload.array("files", 4), async (req, res) => {
     })
   );
 
-  // -------------------------
-  // CST timestamp (no Luxon)
-  // -------------------------
+  // Timestamp string
   const now = new Date();
-  const timeString = now.toLocaleString("en-US", {
-    timeZone: "America/Chicago",
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  const timeString = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   const postData = {
     id: nextPostId++,
@@ -91,17 +81,47 @@ app.post("/post", upload.array("files", 4), async (req, res) => {
 });
 
 // -------------------------
+// Vote endpoints
+// -------------------------
+app.post("/updateVote", (req, res) => {
+  const { postId, amount } = req.body;
+  const post = posts.find((p) => p.id === parseInt(postId));
+  if (!post) return res.status(404).json({ error: "Post not found" });
+
+  post.upvote += amount;
+  return res.json({ message: "Vote updated", post });
+});
+
+app.post("/updatePoll", (req, res) => {
+  const { postId, optionIndex } = req.body;
+  const post = posts.find((p) => p.id === parseInt(postId));
+  if (!post) return res.status(404).json({ error: "Post not found" });
+  if (!post.poll || !Array.isArray(post.poll)) return res.status(400).json({ error: "This post has no poll" });
+  if (optionIndex < 0 || optionIndex >= post.poll.length) return res.status(400).json({ error: "Invalid poll option index" });
+
+  post.pollResults[optionIndex] += 1;
+  return res.json({ message: "Poll updated", post });
+});
+
+// -------------------------
+// GET endpoints
+// -------------------------
 app.get("/getPosts", (req, res) => res.json(posts));
 
 app.get("/getNewPosts", (req, res) => {
   const since = Number(req.query.since);
   if (!since) return res.json([]);
-  res.json(posts.filter((p) => p.id > since));
+  const newPosts = posts.filter((post) => post.id > since);
+  res.json(newPosts);
 });
 
+// -------------------------
+// Test route
+// -------------------------
 app.get("/", (req, res) => res.send("Backend is running 🚀"));
 
+// -------------------------
+// Start server
+// -------------------------
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server listening on port ${PORT}`);
-});
+app.listen(PORT, "0.0.0.0", () => console.log(`Server listening on port ${PORT}`));
