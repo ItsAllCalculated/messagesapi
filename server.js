@@ -23,7 +23,7 @@ app.use(cors());
 app.use(express.json());
 
 // In-memory cache (optional)
-let posts = [];
+let postsCache = [];
 
 // -------------------------
 // Multer memory storage (works for Cloud Run)
@@ -66,21 +66,16 @@ app.post("/post", upload.array("files", 4), async (req, res) => {
       })
     );
 
-    // Timestamp string (CST)
-    const now = new Date();
-    const cstHours = (now.getUTCHours() - 6 + 24) % 24; // UTC−6
-    const timeString = `${now.getUTCMonth() + 1}/${now.getUTCDate()}/${now.getUTCFullYear()} ${String(cstHours).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
-
     // Prepare post data
     const postData = {
       body: body || null,
       files: uploadedFiles,
-      time: timeString,
       poll: pollOptions,
       pollResults: pollOptions ? [0, 0, 0, 0] : null,
       upvote: 0,
       replyId: Number(replyId),
       replyLevel: Number(replyLevel),
+      createdAt: admin.firestore.Timestamp.now(), // Use Firestore timestamp
     };
 
     // Save to Firestore with auto-generated ID
@@ -90,11 +85,11 @@ app.post("/post", upload.array("files", 4), async (req, res) => {
     const savedPost = { id: docRef.id, ...postData };
 
     // Optional: keep in-memory cache
-    posts.push(savedPost);
+    postsCache.push(savedPost);
 
     res.json({ message: "Posted successfully", post: savedPost });
   } catch (err) {
-    console.error(err);
+    console.error("POST /post error:", err);
     res.status(500).json({ error: "Failed to create post" });
   }
 });
@@ -110,12 +105,12 @@ app.post("/updateVote", async (req, res) => {
     if (!doc.exists) return res.status(404).json({ error: "Post not found" });
 
     const post = doc.data();
-    post.upvote += amount;
+    post.upvote = (post.upvote || 0) + amount;
 
     await postRef.update({ upvote: post.upvote });
     res.json({ message: "Vote updated", post: { id: postId, ...post } });
   } catch (err) {
-    console.error(err);
+    console.error("POST /updateVote error:", err);
     res.status(500).json({ error: "Failed to update vote" });
   }
 });
@@ -131,15 +126,17 @@ app.post("/updatePoll", async (req, res) => {
     if (!doc.exists) return res.status(404).json({ error: "Post not found" });
 
     const post = doc.data();
-    if (!post.poll || !Array.isArray(post.poll)) return res.status(400).json({ error: "This post has no poll" });
-    if (optionIndex < 0 || optionIndex >= post.poll.length) return res.status(400).json({ error: "Invalid poll option index" });
+    if (!post.poll || !Array.isArray(post.poll))
+      return res.status(400).json({ error: "This post has no poll" });
+    if (optionIndex < 0 || optionIndex >= post.poll.length)
+      return res.status(400).json({ error: "Invalid poll option index" });
 
-    post.pollResults[optionIndex] += 1;
+    post.pollResults[optionIndex] = (post.pollResults[optionIndex] || 0) + 1;
 
     await postRef.update({ pollResults: post.pollResults });
     res.json({ message: "Poll updated", post: { id: postId, ...post } });
   } catch (err) {
-    console.error(err);
+    console.error("POST /updatePoll error:", err);
     res.status(500).json({ error: "Failed to update poll" });
   }
 });
@@ -149,30 +146,85 @@ app.post("/updatePoll", async (req, res) => {
 // -------------------------
 app.get("/getPosts", async (req, res) => {
   try {
-    const snapshot = await db.collection("posts").orderBy("time", "asc").get();
-    const allPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const snapshot = await db
+      .collection("posts")
+      .orderBy("createdAt", "asc")
+      .get();
+
+    const allPosts = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        body: data.body,
+        files: data.files || [],
+        poll: data.poll || [],
+        pollResults: data.pollResults || [0, 0, 0, 0],
+        upvote: data.upvote || 0,
+        replyId: data.replyId || -1,
+        replyLevel: data.replyLevel || 0,
+        time: data.createdAt
+          ? new Date(data.createdAt.seconds * 1000).toLocaleString("en-US", {
+              timeZone: "America/Chicago",
+              month: "numeric",
+              day: "numeric",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "unknown",
+      };
+    });
+
     res.json(allPosts);
   } catch (err) {
-    console.error(err);
+    console.error("GET /getPosts error:", err);
     res.status(500).json({ error: "Failed to fetch posts" });
   }
 });
 
 // -------------------------
-// GET posts since ID
+// GET posts since timestamp
 // -------------------------
 app.get("/getNewPosts", async (req, res) => {
   try {
-    const since = req.query.since;
-    if (!since) return res.json([]);
+    const sinceMillis = Number(req.query.since);
+    if (!sinceMillis) return res.json([]);
 
-    const snapshot = await db.collection("posts").get();
-    const newPosts = snapshot.docs
-      .map(doc => ({ id: doc.id, ...doc.data() }))
-      .filter(post => post.id > since); // note: Firestore IDs are strings
+    const sinceTimestamp = admin.firestore.Timestamp.fromMillis(sinceMillis);
+
+    const snapshot = await db
+      .collection("posts")
+      .where("createdAt", ">", sinceTimestamp)
+      .orderBy("createdAt", "asc")
+      .get();
+
+    const newPosts = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        body: data.body,
+        files: data.files || [],
+        poll: data.poll || [],
+        pollResults: data.pollResults || [0, 0, 0, 0],
+        upvote: data.upvote || 0,
+        replyId: data.replyId || -1,
+        replyLevel: data.replyLevel || 0,
+        time: data.createdAt
+          ? new Date(data.createdAt.seconds * 1000).toLocaleString("en-US", {
+              timeZone: "America/Chicago",
+              month: "numeric",
+              day: "numeric",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "unknown",
+      };
+    });
+
     res.json(newPosts);
   } catch (err) {
-    console.error(err);
+    console.error("GET /getNewPosts error:", err);
     res.status(500).json({ error: "Failed to fetch new posts" });
   }
 });
@@ -186,4 +238,6 @@ app.get("/", (req, res) => res.send("Backend is running 🚀"));
 // Start server
 // -------------------------
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () => console.log(`Server listening on port ${PORT}`));
+app.listen(PORT, "0.0.0.0", () =>
+  console.log(`Server listening on port ${PORT}`)
+);
