@@ -66,22 +66,17 @@ app.post("/post", upload.array("files", 4), async (req, res) => {
       })
     );
 
-    // Timestamp string (CST)
-    const now = new Date();
-    const cstHours = (now.getUTCHours() - 6 + 24) % 24; // UTC−6
-    const timeString = `${now.getUTCMonth() + 1}/${now.getUTCDate()}/${now.getUTCFullYear()} ${String(cstHours).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
-
-    // Prepare post data
-    const postData = {
-      body: body || null,
-      files: uploadedFiles,
-      time: timeString,
-      poll: pollOptions,
-      pollResults: pollOptions ? [0, 0, 0, 0] : null,
-      upvote: 0,
-      replyId: replyId,
-      replyLevel: Number(replyLevel),
-    };
+// Prepare post data with Firestore timestamp
+const postData = {
+  body: body || null,
+  files: uploadedFiles,
+  createdAt: admin.firestore.FieldValue.serverTimestamp(), // ✅ proper timestamp
+  poll: pollOptions,
+  pollResults: pollOptions ? [0, 0, 0, 0] : null,
+  upvote: 0,
+  replyId: replyId,
+  replyLevel: Number(replyLevel),
+};
 
     // Save to Firestore with auto-generated ID
     const docRef = await db.collection("posts").add(postData);
@@ -170,21 +165,25 @@ app.get("/getPosts", async (req, res) => {
 // -------------------------
 // GET posts since ID
 // -------------------------
-app.get("/getNewPosts", async (req, res) => {
+app.get("/getPosts", async (req, res) => {
   try {
-    const since = req.query.since;
-    if (!since) return res.json([]);
+    const snapshot = await db
+      .collection("posts")
+      .orderBy("createdAt", "asc") // use timestamp, not string
+      .get();
 
-    const snapshot = await db.collection("posts").get();
-    const newPosts = snapshot.docs
-      .map(doc => ({ id: doc.id, ...doc.data() }))
-      .filter(post => post.id > since); // note: Firestore IDs are strings
-    res.json(newPosts);
+    const allPosts = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.json(allPosts);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch new posts" });
+    console.error("GET /getPosts error:", err);
+    res.status(500).json({ error: "Failed to fetch posts" });
   }
 });
+
 
 // -------------------------
 // Test route
