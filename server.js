@@ -165,24 +165,40 @@ app.get("/getPosts", async (req, res) => {
 // -------------------------
 // GET posts since ID
 // -------------------------
+// -------------------------
+// GET all posts (with replies properly ordered)
+// -------------------------
 app.get("/getPosts", async (req, res) => {
   try {
-    const snapshot = await db
-      .collection("posts")
-      .orderBy("createdAt", "asc") // use timestamp, not string
-      .get();
+    // Fetch all posts ordered by creation time
+    const snapshot = await db.collection("posts").orderBy("createdAt", "asc").get();
+    const allPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-    const allPosts = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    // Separate main posts and replies
+    const mainPosts = allPosts.filter(post => Number(post.replyId) === 0);
+    const replies = allPosts.filter(post => Number(post.replyId) !== 0);
 
-    res.json(allPosts);
+    // Build the ordered list
+    const orderedPosts = [];
+    mainPosts.forEach(post => {
+      orderedPosts.push(post);
+
+      // Add replies for this post immediately after it
+      const postReplies = replies.filter(r => r.replyId === post.id);
+      if (postReplies.length > 0) {
+        // Sort replies by createdAt ascending
+        postReplies.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+        orderedPosts.push(...postReplies);
+      }
+    });
+
+    res.json(orderedPosts);
   } catch (err) {
     console.error("GET /getPosts error:", err);
-    res.status(500).json({ error: "Failed to fetch posts" });
+    res.status(500).json({ error: "Failed to fetch posts!" });
   }
 });
+
 
 
 // -------------------------
