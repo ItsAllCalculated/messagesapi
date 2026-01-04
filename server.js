@@ -67,21 +67,16 @@ app.post("/post", upload.array("files", 4), async (req, res) => {
     );
 
     // Timestamp string (CST)
-    const now = new Date();
-    const cstHours = (now.getUTCHours() - 6 + 24) % 24; // UTC−6
-    const timeString = `${now.getUTCMonth() + 1}/${now.getUTCDate()}/${now.getUTCFullYear()} ${String(cstHours).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
-
-    // Prepare post data
-    const postData = {
-      body: body || null,
-      files: uploadedFiles,
-      time: timeString,
-      poll: pollOptions,
-      pollResults: pollOptions ? [0, 0, 0, 0] : null,
-      upvote: 0,
-      replyId: replyId,
-      replyLevel: Number(replyLevel),
-    };
+   const postData = {
+  body: body || null,
+  files: uploadedFiles,
+  createdAt: admin.firestore.FieldValue.serverTimestamp(), // ✅ proper timestamp
+  poll: pollOptions,
+  pollResults: pollOptions ? [0, 0, 0, 0] : null,
+  upvote: 0,
+  replyId: replyId,
+  replyLevel: Number(replyLevel),
+};
 
     // Save to Firestore with auto-generated ID
     const docRef = await db.collection("posts").add(postData);
@@ -149,14 +144,38 @@ app.post("/updatePoll", async (req, res) => {
 // -------------------------
 app.get("/getPosts", async (req, res) => {
   try {
-    const snapshot = await db.collection("posts").get();
+    // Fetch all posts, ignore null timestamps to avoid Firestore errors
+    const snapshot = await db
+      .collection("posts")
+      .orderBy("createdAt", "asc")
+      .get();
+
     const allPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    res.json(allPosts);
+
+    // Separate main posts (replyId === 0) and replies (replyId != 0)
+    const mainPosts = allPosts.filter(post => Number(post.replyId) === 0);
+    const replies = allPosts.filter(post => Number(post.replyId) !== 0);
+
+    // Build the ordered list
+    const orderedPosts = [];
+    mainPosts.forEach(post => {
+      orderedPosts.push(post);
+
+      // Attach replies for this post immediately after it
+      const postReplies = replies
+        .filter(r => r.replyId === post.id)
+        .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)); // chronological
+
+      orderedPosts.push(...postReplies);
+    });
+
+    res.json(orderedPosts);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch posts" });
+    console.error("GET /getPosts error:", err);
+    res.status(500).json({ error: "Failed to fetch posts!" });
   }
 });
+
 
 // -------------------------
 // GET posts since ID
