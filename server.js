@@ -149,14 +149,23 @@ app.post("/updatePoll", async (req, res) => {
 // -------------------------
 app.get("/getPosts", async (req, res) => {
   try {
-    const snapshot = await db.collection("posts").orderBy("time", "asc").get();
-    const allPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const snapshot = await db
+      .collection("posts")
+      .orderBy("createdAt", "asc")
+      .get();
+
+    const allPosts = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
     res.json(allPosts);
   } catch (err) {
-    console.error(err);
+    console.error("GET /getPosts error:", err);
     res.status(500).json({ error: "Failed to fetch posts" });
   }
 });
+
 
 // -------------------------
 // GET posts since ID
