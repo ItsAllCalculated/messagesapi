@@ -144,32 +144,54 @@ app.post("/updatePoll", async (req, res) => {
 // -------------------------
 app.get("/getPosts", async (req, res) => {
   try {
-    // Fetch all posts, ignore null timestamps to avoid Firestore errors
     const snapshot = await db
       .collection("posts")
-      .orderBy("createdAt", "asc")
+      .orderBy("createdAt", "desc")
       .get();
 
-    const allPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const allPosts = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
-    // Separate main posts (replyId === 0) and replies (replyId != 0)
-    const mainPosts = allPosts.filter(post => Number(post.replyId) === 0);
-    const replies = allPosts.filter(post => Number(post.replyId) !== 0);
+    // Build lookup map of children
+    const children = new Map();
 
-    // Build the ordered list
-    const orderedPosts = [];
-    mainPosts.forEach(post => {
-      orderedPosts.push(post);
+    allPosts.forEach(post => {
+      const parentId = post.replyId || 0;
 
-      // Attach replies for this post immediately after it
-      const postReplies = replies
-        .filter(r => r.replyId === post.id)
-        .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)); // chronological
-
-      orderedPosts.push(...postReplies);
+      if (!children.has(parentId)) children.set(parentId, []);
+      children.get(parentId).push(post);
     });
 
-    res.json(orderedPosts);
+    // Recursive function to flatten replies
+    const ordered = [];
+
+    function addPostWithReplies(post) {
+      ordered.push(post);
+
+      const replies = children.get(post.id);
+      if (!replies) return;
+
+      // Replies oldest → newest
+      replies.sort(
+        (a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)
+      );
+
+      replies.forEach(addPostWithReplies);
+    }
+
+    // Root posts (replyId === 0)
+    const roots = children.get(0) || [];
+
+    // Roots newest → oldest
+    roots.sort(
+      (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
+    );
+
+    roots.forEach(addPostWithReplies);
+
+    res.json(ordered);
   } catch (err) {
     console.error("GET /getPosts error:", err);
     res.status(500).json({ error: "Failed to fetch posts!" });
