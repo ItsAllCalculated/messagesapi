@@ -154,42 +154,42 @@ app.get("/getPosts", async (req, res) => {
       ...doc.data(),
     }));
 
-    // Build lookup map of children
+    // Map of parentId -> replies[]
     const children = new Map();
 
     allPosts.forEach(post => {
-      const parentId = post.replyId || 0;
+      // normalize to string; root = "0"
+      const parentId = String(post.replyId ?? "0");
 
       if (!children.has(parentId)) children.set(parentId, []);
       children.get(parentId).push(post);
     });
 
-    // Recursive function to flatten replies
     const ordered = [];
 
-    function addPostWithReplies(post) {
+    function addWithReplies(post) {
       ordered.push(post);
 
-      const replies = children.get(post.id);
+      const replies = children.get(String(post.id));
       if (!replies) return;
 
-      // Replies oldest → newest
+      // replies oldest → newest
       replies.sort(
         (a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)
       );
 
-      replies.forEach(addPostWithReplies);
+      replies.forEach(addWithReplies);
     }
 
-    // Root posts (replyId === 0)
-    const roots = children.get(0) || [];
+    // ROOT posts (replyId === "0")
+    const roots = children.get("0") || [];
 
-    // Roots newest → oldest
+    // newest → oldest at root
     roots.sort(
       (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
     );
 
-    roots.forEach(addPostWithReplies);
+    roots.forEach(addWithReplies);
 
     res.json(ordered);
   } catch (err) {
